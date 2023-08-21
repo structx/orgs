@@ -1,0 +1,19 @@
+version: '2'
+sql:
+- schema: migrations
+  queries: sqlc/queries
+  engine: postgresql
+  gen:
+    go:
+      package: repository
+      out: internal/repository
+      sql_package: pgx/v5
+      emit_empty_slices: true
+      emit_prepared_queries: true
+      emit_params_struct_pointers: true
+      emit_result_struct_pointers: true
+      emit_enum_valid_method: true
+      emit_all_enum_values: true
+      overrides:
+        - db_type: "uuid"
+          go_type: "github.com/gofrs/uuid.UUID"
