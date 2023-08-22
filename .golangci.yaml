@@ -1,0 +1,23 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: false
+
+linters:
+  enable:
+    - cyclop
+    - goimports
+    - revive
+    - govet
+    - staticcheck
+    - gosec
+
+linters-settings:
+  cyclop:
+    skip-tests: true
+    max-complexity: 16
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
