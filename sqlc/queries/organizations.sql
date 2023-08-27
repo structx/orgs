@@ -1,7 +1,8 @@
 
 -- name: CreateOrganization :one
 INSERT INTO organizations (
-    name
+    name,
+    processor_id
 ) VALUES (
-    $1
+    $1, $2
 ) RETURNING *;

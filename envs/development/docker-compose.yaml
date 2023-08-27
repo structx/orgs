@@ -1,0 +1,6 @@
+---
+version: '3.7'
+
+services:
+  image: structx/orgs:latest
+  container_name: orgs
