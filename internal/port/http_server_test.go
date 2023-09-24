@@ -43,7 +43,7 @@ func (suite *HTTPServerSuite) SetupTest() {
 
 	srv := port.NewHTTPServer(log, s)
 
-	suite.mux = port.NewRouter(srv)
+	suite.mux = port.NewRouter(nil, srv)
 }
 
 func TestHTTPServerSuite(t *testing.T) {
