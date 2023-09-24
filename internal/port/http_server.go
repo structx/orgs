@@ -6,15 +6,46 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
-	"github.com/structx/orgs/internal/domain"
+
 	"go.uber.org/zap"
+
+	"github.com/structx/orgs/internal/domain"
+	"github.com/structx/orgs/internal/middleware"
 )
 
 // HTTPServer is the http server
 type HTTPServer struct {
 	log     *zap.SugaredLogger
 	service *domain.OrganizationService
+}
+
+// NewHTTPServer creates a new http server
+func NewHTTPServer(log *zap.Logger, service *domain.OrganizationService) *HTTPServer {
+	return &HTTPServer{
+		log:     log.Sugar().Named("http_server"),
+		service: service,
+	}
+}
+
+// NewRouter creates a new router
+func NewRouter(auth *middleware.Authenticator, srv *HTTPServer) *chi.Mux {
+
+	router := chi.NewRouter()
+
+	router.Mount("/api/v1", router.Group(func(r chi.Router) {
+		r.Use(auth.Authenticate)
+		r.Post("/organizations", srv.createOrganization)
+		r.Get("/organizations/{id}", srv.fetchOrganization)
+		r.Put("/organizations", srv.updateOrganiaztion)
+		r.Delete("/organizations/{id}", srv.deleteOrganization)
+	}))
+
+	router.Get("/stripe_webhooks", srv.stripeWebhooks)
+	router.Get("/health", srv.health)
+
+	return router
 }
 
 // NewOrganizationPayload is the payload for creating a new organization
@@ -43,7 +74,7 @@ func (nop *NewOrganizationParams) Bind(_ *http.Request) error {
 	return nil
 }
 
-func (s *HTTPServer) createOrg(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) createOrganization(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -55,7 +86,7 @@ func (s *HTTPServer) createOrg(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// create organization
-	org, err := s.service.Create(ctx, &domain.NewOrganization{
+	org, err := h.service.Create(ctx, &domain.NewOrganization{
 		Name:        p.Payload.Name,
 		City:        p.Payload.City,
 		Country:     p.Payload.Country,
@@ -65,7 +96,7 @@ func (s *HTTPServer) createOrg(w http.ResponseWriter, r *http.Request) {
 		Street:      p.Payload.Street,
 	})
 	if err != nil {
-		s.log.Errorf("failed to create organization: %v", err)
+		h.log.Errorf("failed to create organization: %v", err)
 		http.Error(w, "failed to create organization", http.StatusInternalServerError)
 		return
 	}
@@ -74,8 +105,23 @@ func (s *HTTPServer) createOrg(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	err = json.NewEncoder(w).Encode(org)
 	if err != nil {
-		s.log.Errorf("failed to encode response: %v", err)
+		h.log.Errorf("failed to encode response: %v", err)
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
+	}
+}
+
+func (h *HTTPServer) fetchOrganization(w http.ResponseWriter, r *http.Request) {}
+
+func (h *HTTPServer) updateOrganiaztion(w http.ResponseWriter, r *http.Request) {}
+
+func (h *HTTPServer) deleteOrganization(w http.ResponseWriter, r *http.Request) {}
+
+func (h *HTTPServer) health(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write([]byte("OK"))
+	if err != nil {
+		h.log.Errorf("failed to write response: %v", err)
+		http.Error(w, "failed to write response", http.StatusInternalServerError)
 	}
 }

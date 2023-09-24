@@ -3,14 +3,16 @@ package domain
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/structx/orgs/internal/event"
+	"github.com/structx/orgs/internal/messaging"
 	"github.com/structx/orgs/internal/payment"
-	"github.com/structx/orgs/internal/pubsub"
 	"github.com/structx/orgs/internal/repository"
 )
 
@@ -37,6 +39,7 @@ type NewOrganization struct {
 	PostalCode  string
 	State       string
 	Street      string
+	CreatedBy   uuid.UUID
 }
 
 // Organization ...
@@ -49,19 +52,25 @@ type Organization struct {
 	UpdatedAt   time.Time
 }
 
+// UpdateOrganization ...
+type UpdateOrganization struct {
+	ID   uuid.UUID
+	Name string
+}
+
 // OrganizationService is a service for organization
 type OrganizationService struct {
-	processor payment.Processor
-	db        *sql.DB
-	pubsub    *pubsub.Client
+	processor *payment.StripeClient
+	pool      *pgxpool.Pool
+	messaging *messaging.Client
 }
 
 // NewOrganizationService returns a new organization service
-func NewOrganizationService(db *sql.DB, pubsub *pubsub.Client, processor payment.Processor) (*OrganizationService, error) {
+func NewOrganizationService(pool *pgxpool.Pool, processor *payment.StripeClient, messaging *messaging.Client) (*OrganizationService, error) {
 	return &OrganizationService{
-		db:        db,
-		pubsub:    pubsub,
+		pool:      pool,
 		processor: processor,
+		messaging: messaging,
 	}, nil
 }
 
@@ -72,13 +81,21 @@ func (os *OrganizationService) Create(ctx context.Context, newOrganization *NewO
 	timeout, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 
+	// begin transaction
+	tx, err := os.pool.Begin(timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(timeout)
+
+	// create organization account holder through payment processor
 	processorID, err := os.processor.CreateAccountHolder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account holder: %w", err)
 	}
 
 	// create organization
-	sqlOrg, err := repository.New(os.db).CreateOrganization(timeout, &repository.CreateOrganizationParams{
+	sqlOrg, err := repository.New(os.pool).WithTx(tx).CreateOrganization(timeout, &repository.CreateOrganizationParams{
 		Name:        newOrganization.Name,
 		ProcessorID: processorID,
 	})
@@ -86,12 +103,51 @@ func (os *OrganizationService) Create(ctx context.Context, newOrganization *NewO
 		return nil, err
 	}
 
+	// create event for message broker
+	evt := &event.OrganizationCreated{
+		ID:        sqlOrg.ID.String(),
+		CreatedBy: newOrganization.CreatedBy.String(),
+	}
+
+	// marshal event
+	msg, err := json.Marshal(evt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	// publish message
+	err = os.messaging.Publish(timeout, "organization.created", msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to publish message: %w", err)
+	}
+
+	// commit transaction
+	err = tx.Commit(timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return &Organization{
 		ID:          sqlOrg.ID,
 		Name:        sqlOrg.Name,
 		ProcessorID: sqlOrg.ProcessorID.(string),
 		Status:      OrganizationStatus(sqlOrg.Status),
-		CreatedAt:   sqlOrg.CreatedAt,
+		CreatedAt:   sqlOrg.CreatedAt.Time,
 		UpdatedAt:   time.Time{},
 	}, nil
+}
+
+// Get gets an organization
+func (os *OrganizationService) Get(ctx context.Context, id uuid.UUID) (*Organization, error) {
+	return &Organization{}, nil
+}
+
+// Update updates an organization
+func (os *OrganizationService) Update(ctx context.Context, organization *Organization) (*Organization, error) {
+	return nil, nil
+}
+
+// Delete deletes an organization
+func (os *OrganizationService) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
 }

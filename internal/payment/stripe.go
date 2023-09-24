@@ -1,3 +1,4 @@
+// Package payment contains payment processor
 package payment
 
 import (
@@ -13,9 +14,6 @@ import (
 type StripeClient struct {
 	client client.API
 }
-
-// interface verification
-var _ Processor = (*StripeClient)(nil)
 
 // NewStripeClient returns a new Stripe payment processor
 func NewStripeClient() (*StripeClient, error) {
